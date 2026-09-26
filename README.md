@@ -37,6 +37,8 @@ Speech recognizers often mangle English terms inside Chinese speech (I kept gett
 
 ## Using it
 
+<p align="center"><img src="docs/hud.png" alt="The HUD at the bottom of the screen: recording for 1 second with a live level meter, and a chip saying two earlier clips are still transcribing" width="420"></p>
+
 | Action | Result |
 |---|---|
 | **Hold right Command, speak, release** | Transcribed and pasted at the cursor (walkie-talkie mode) |
