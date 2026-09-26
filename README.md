@@ -1,65 +1,60 @@
 <h1 align="center">voice-input</h1>
 
 <p align="center">
-  <b>Tap a key on your Mac, speak, and the text lands at your cursor.</b><br>
-  Push-to-talk dictation for people who speak Chinese mixed with English tech terms —
-  built for coding, talking to Claude Code / ChatGPT, and chat.
+  <b>在 Mac 上按一下键说中文，说完文字就出现在光标处。</b><br>
+  给说话中英夹杂的人做的语音输入：写代码、和 Claude Code / ChatGPT 对话、回消息都能用。
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <img alt="macOS + Hammerspoon" src="https://img.shields.io/badge/macOS-Hammerspoon-1f425f.svg">
-  <img alt="about ¥0.8 per hour of audio" src="https://img.shields.io/badge/cost-~¥0.8%20%2F%20hour%20of%20audio-D97757.svg">
+  <img alt="约 ¥0.8 / 小时录音" src="https://img.shields.io/badge/费用-约%20¥0.8%20%2F%20小时录音-D97757.svg">
 </p>
 
 <p align="center">
-  <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
+  <b>简体中文</b> · <a href="README.en.md">English</a>
 </p>
 
 <p align="center">
-  <img src="docs/panel.png" alt="The panel's stats tab: transcriptions per day over 14 days, colored by model, with a hover tooltip showing per-model counts and that day's cost" width="820">
+  <img src="docs/panel.png" alt="面板的统计页：最近 14 天每天的转写次数按模型分色，悬停某一天显示各模型的次数和当天花费" width="820">
 </p>
 
-## Why
+## 为什么做这个
 
-macOS dictation mangles English terms inside Chinese speech ("Claude Code" becomes
-"cloud code"), and the commercial tools are monthly subscriptions hosted abroad. This one:
+系统自带的听写认不准英文技术词（"Claude Code" 会变成 "cloud code"），商业产品按月订阅、
+服务器在国外。这个工具的做法：
 
-- **Transcribes with Alibaba Cloud Bailian `qwen3-asr-flash`** — about one second per
-  utterance from mainland China, roughly **¥0.8 per hour of audio** at list price.
-- **Proofreads with `qwen-plus` under a strict brief**: drop fillers and stutters, fix
-  punctuation, normalize English spelling — **never rewrite**. If the output length drifts,
-  the proofread is discarded and the raw transcript is used.
-- **Vocabulary list**: tell the model the names you use; `wrong => right` rules patch what
-  it still gets wrong.
-- **Fallback chain**: Alibaba Cloud → Gemini (free tier) → an on-device model (works
-  offline). Rate-limited or unreachable models are skipped automatically.
+- **听写用阿里云百炼的 `qwen3-asr-flash`**：国内直连，一段话一秒左右出结果，
+  按标价约 **¥0.8 / 小时录音**（我自己一天录了 47 分钟，估算 ¥0.63）。
+- **再用 `qwen-plus` 校对一遍**：只许删"嗯啊"和口吃重复、改标点、把英文词改成标准写法，
+  **不许改写原话**。模型越界（输出长度明显变了）就丢掉校对结果，用原始听写。
+- **常用词表**：告诉模型你常说的专有名词；模型还是写错时，用 `错误 => 正确` 规则兜底。
+- **多个模型依次备用**：阿里云 → Gemini（免费额度）→ 本机模型（断网也能用），
+  哪个限额了、连不上了自动换下一个。
 
-## Using it
+## 用起来是什么样
 
-| Action | Result |
+| 操作 | 效果 |
 |---|---|
-| **Hold right Command, speak, release** | Transcribed and pasted at the cursor (walkie-talkie mode) |
-| **Tap right Command, speak, tap again** | Same, for longer passages |
-| **Esc** while recording | Cancel (the audio is still kept, recoverable from the menu) |
-| **⌃⌥V** | Picker over the last 40 transcripts; choose one to paste |
-| Mouse **back button** to talk, **forward button** for Return | Optional, enable in the menu |
+| **按住右 Command 说话，松开** | 转写，文字粘贴到光标处（对讲机模式，适合短句） |
+| **轻点右 Command，说完再点一下** | 同上，适合长段，不用一直按着 |
+| 录音中按 **Esc** | 取消（录音还是会存下来，误取消可以从菜单找回） |
+| **⌃⌥V** | 最近 40 条转写的列表，选一条粘贴 |
+| 鼠标**后侧键**按住说话、**前侧键**回车 | 可选，菜单里打开；不碰键盘也能用 |
 
-- A small HUD at the bottom of the screen shows elapsed time and a live level meter, plus how
-  many earlier clips are still being transcribed — you can keep talking while they finish.
-- The text **always goes to the clipboard**; it is auto-pasted only if the cursor is still
-  in the same input field, otherwise you get a "press ⌘V" hint.
-- Saying just "compact" outputs `/compact`, and "继续" ("continue") outputs itself without a
-  trailing period — handy for Claude Code.
-- Newlines are stripped before pasting, because Claude Code collapses multi-line pastes
-  into `[Pasted text]`.
+- 屏幕底部有一个小浮窗：录音时显示时长和实时音量，后台还有几段在转写也会显示出来，
+  可以一段没转完就接着说下一段。
+- 文字**总是会放进剪贴板**；光标还在原来的输入框里就自动粘贴，切走了就提示你按 ⌘V。
+- 整段只说 "compact" 会输出 `/compact`，只说"继续"会输出"继续"（不带句号），
+  方便直接对 Claude Code 下命令。
+- 粘贴前会去掉转写里的换行：Claude Code 会把多行的粘贴折叠成 `[Pasted text]`，看不到内容。
 
-Menu bar mic → **Open panel** to browse history (replay, re-transcribe, copy), see daily
-usage and cost, per-model call stats, and edit keys, model order, microphone and vocabulary.
+菜单栏麦克风 → **打开面板**：看转写记录（能重听、重新转写、复制）、每天用量和花费、
+按模型的调用情况，设置 Key、模型顺序、麦克风、常用词。
 
-## Install
+## 安装
 
-Requires macOS and [Homebrew](https://brew.sh).
+需要 macOS、[Homebrew](https://brew.sh)。
 
 ```bash
 brew install --cask hammerspoon
@@ -68,68 +63,73 @@ git clone https://github.com/threedaycat/voice-input ~/projects/voice-input
 ~/projects/voice-input/install.sh
 ```
 
-`install.sh` checks dependencies, copies the example vocabulary to
-`~/.config/voice-input/vocab.txt`, and appends two lines to `~/.hammerspoon/init.lua`
-that load this repo (your existing config is left alone). Then:
+`install.sh` 会检查依赖，把示例词表复制到 `~/.config/voice-input/vocab.txt`，
+并在 `~/.hammerspoon/init.lua` 末尾加两行加载本仓库（已有的配置不动）。然后：
 
-1. Open Hammerspoon and grant it **Accessibility** and **Microphone** in System Settings →
-   Privacy & Security.
-2. Create an API key on [Alibaba Cloud Bailian](https://bailian.console.aliyun.com/)
-   (a few yuan lasts a long time), or a Gemini key.
-3. Menu bar mic → Open panel → Settings: paste the key and hit Test.
-4. Tap right Command, say something, tap again.
+1. 打开 Hammerspoon；系统设置 → 隐私与安全性，给它打开**辅助功能**和**麦克风**。
+2. 去[阿里云百炼](https://bailian.console.aliyun.com/)开通服务、创建 API Key（充几块钱够用很久）。
+3. 菜单栏麦克风 → 打开面板 → 设置：填 Key，点「测试」。
+4. 按一下右 Command，说句话，再按一下。
 
 <details>
-<summary>Other ways to configure</summary>
+<summary>其它设置方式</summary>
 
-- Keys can come from environment variables `DASHSCOPE_API_KEY` / `GEMINI_API_KEY`.
-  Hammerspoon doesn't inherit your terminal environment, so put them in `~/.zshenv`
-  (or `~/.secrets.zsh`, which is sourced if present).
-- Gemini needs a proxy from mainland China — set `https_proxy` in `~/.zshenv`.
-  Alibaba Cloud requests always go direct.
-- Trigger key: menu → "设置触发键…" (set trigger key); any single modifier works.
-- Hide the Hammerspoon menu bar icon: run
-  `hs.settings.set("voice.hideHammerspoonIcon", true)` in the console and reload.
-- Settings live in `~/.config/voice-input/config.json`.
+- Key 也可以用环境变量：`DASHSCOPE_API_KEY`（阿里云）、`GEMINI_API_KEY`（Gemini）。
+  Hammerspoon 不继承终端的环境变量，要放在 `~/.zshenv`，或者 `~/.secrets.zsh`（有的话会自动读）。
+- Gemini 在国内要走代理，同样在 `~/.zshenv` 里设 `https_proxy`；阿里云请求强制直连。
+- 触发键：菜单 →「设置触发键…」，可以换成任意单独的修饰键（左右 Command/Option/Control/Shift、Fn）。
+- 隐藏 Hammerspoon 的锤子图标：控制台执行 `hs.settings.set("voice.hideHammerspoonIcon", true)`，再重新加载配置。
+- 设置文件在 `~/.config/voice-input/config.json`，面板里改的都存在这。
 
 </details>
 
-### Optional: on-device model
+### 可选：本机模型
 
 ```bash
 ~/projects/voice-input/local-asr/setup.sh
 ```
 
-Installs Qwen3-ASR-1.7B (4-bit MLX, Apple Silicon only, ~1.7 GB). It's only loaded when
-every cloud model fails. On an M4 over 10 clips: ~1.7 s per clip, 2.5 GB peak memory,
-noticeably less accurate than the cloud model — a last resort.
+装的是 Qwen3-ASR-1.7B（4-bit MLX 版，只支持 Apple Silicon），约 1.7 GB。平时不加载，
+云端都连不上时才用。我在 M4 上测 10 段录音：每段约 1.7 秒，峰值内存 2.5 GB，
+准确度比云端差一截（10 段里约 5 处听错），所以只当最后的备用。
 
-## Cost
+## 常用词表
 
-Each response reports the billed audio seconds / tokens; the script multiplies by list
-price and logs it to `~/.local/state/voice-input/calls.jsonl`. The panel sums those.
-**It is an estimate, not your bill** — check the Alibaba Cloud billing console.
-
-## Privacy
-
-- Audio is sent to whichever provider you configure (Alibaba Cloud / Google); the
-  on-device model keeps it local.
-- History and call logs stay in `~/.local/state/voice-input/`; only the last 10
-  recordings are kept (configurable).
-- Keys are stored in `~/.config/voice-input/config.json` with mode 600.
-
-## Layout
+`~/.config/voice-input/vocab.txt`（面板 → 设置 → 常用词 也能改）：
 
 ```
-bin/voice-input            recording (ffmpeg), model calls, proofreading, vocab rules — also a CLI
-hammerspoon/voice.lua      hotkeys, HUD, menu, pasting
-hammerspoon/voice_panel.lua + panel.html   the panel
-local-asr/                 optional on-device model
-tools/restart-hammerspoon  restart Hammerspoon after edits (refuses while recording)
+Claude Code          ← 一行一个词：写进提示词，模型听到发音相近的就按这个写法
+Cloud Code => Claude Code   ← 转写完再替换，模型还是写错时兜底
 ```
 
-The UI and prompts are in Chinese; the prompts assume mostly-Chinese speech.
+英文规则按整词、不分大小写匹配；规则按顺序执行，**具体的写在前面，宽泛的写在后面**。
+词表别太长，否则模型会往词表里的词上硬靠。最好的来源是你自己的转写历史：
+用几天后翻 `~/.local/state/voice-input/history.jsonl`，把反复听错的词加进来。
 
-## License
+## 花费是怎么算的
+
+每次调用，阿里云的返回结果里会写这次按多少秒音频、多少 token 计费，脚本乘上官方标价记进
+`~/.local/state/voice-input/calls.jsonl`，面板上的金额就是这些加起来。**这是估算，不是账单**；
+实际扣款以阿里云控制台「费用与成本」为准（新用户可能有免费额度）。
+
+## 隐私
+
+- 录音会发给你配置的模型服务商（阿里云 / Google）；只用本机模型就不出本机。
+- 转写历史、调用记录存在 `~/.local/state/voice-input/`，录音只保留最近 10 段（可以改）。
+- Key 存在 `~/.config/voice-input/config.json`，权限 600。
+
+## 文件
+
+```
+bin/voice-input            录音（ffmpeg）+ 调模型 + 校对 + 词表替换，终端里也能直接用
+hammerspoon/voice.lua      按键、浮窗、菜单、粘贴
+hammerspoon/voice_panel.lua + panel.html   面板
+local-asr/                 可选的本机模型
+tools/restart-hammerspoon  改代码后重启 Hammerspoon（正在录音时拒绝，免得截断）
+```
+
+`bin/voice-input` 可以单独用：`voice-input file 录音.wav` 转写一个文件，`voice-input test qwen` 测 Key。
+
+## 许可证
 
 MIT
