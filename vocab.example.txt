@@ -1,0 +1,57 @@
+# 常用词表示例。install.sh 会把它复制到 ~/.config/voice-input/vocab.txt，之后改那一份就行
+# （菜单栏麦克风 → 打开面板 → 设置 → 常用词，也能直接改）。
+#
+# 两种写法：
+#   一行一个词              → 写进提示词，告诉模型"听到发音相近的，按这个写法输出"
+#   错误写法 => 正确写法     → 转写完再逐条替换，模型还是写错时兜底（英文不分大小写，按整词匹配）
+#
+# 建议：先用几天，把真实转写里反复听错的词加进来。词表太长反而会让模型往词表里的词上靠。
+
+# --- AI / 工具 ---
+Claude Code
+Claude
+Codex
+ChatGPT
+Gemini
+DeepSeek
+Qwen
+Cursor
+prompt
+token
+agent
+workflow
+
+# --- 开发 ---
+git
+GitHub
+commit
+push
+merge
+worktree
+API
+API Key
+markdown
+tmux
+iTerm2
+Neovim
+Homebrew
+Xcode
+
+# --- 平台 ---
+macOS
+iOS
+iCloud
+
+# --- 纠错：错误写法 => 正确写法 ---
+# 具体的规则写在前面，宽泛的写在后面：规则按顺序执行，宽泛的先执行会把具体的写法破坏掉。
+Cloud Code => Claude Code
+克劳德 Code => Claude Code
+Codecs => Codex
+work tree => worktree
+MacOS => macOS
+Mac OS => macOS
+ios => iOS
+Deepseek => DeepSeek
+deep seek => DeepSeek
+# 经常对 Claude 说话的话，英文 "cloud" 多半是听错的 Claude；用得上再去掉下一行的 #
+# cloud => Claude

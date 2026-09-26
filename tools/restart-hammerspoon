@@ -1,0 +1,13 @@
+#!/bin/zsh
+# 重启 Hammerspoon（改了 init.lua / voice_panel.lua 后用）。
+# 正在录音或转写时拒绝：杀掉 Hammerspoon 会把正在录的那段话截断。检查和重启紧挨着做，中间不留空档。
+LOG=~/.local/state/voice-input/hammerspoon.log
+busy() {
+  pgrep -f "voice-input (start|stop|finish|retry|file)|ffmpeg" >/dev/null && return 0
+  local last=$(grep -o 'state -> [a-z]*, pending=[0-9]*' "$LOG" | tail -1)
+  [[ -n $last && $last != "state -> idle, pending=0" ]]
+}
+if busy; then print -u2 "正在录音或转写，没有重启"; exit 1; fi
+pkill -x Hammerspoon
+for i in {1..20}; do pgrep -x Hammerspoon >/dev/null || break; sleep 0.2; done
+open -a Hammerspoon && print "已重启"

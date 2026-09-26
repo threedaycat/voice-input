@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>语音输入</title>
+<!--
+  语音输入的面板：记录 / 统计 / 设置。由 hammerspoon/voice_panel.lua 用 hs.webview 打开。
+  数据由 Lua 调 app.render(data) 推进来；页面上的操作用
+  window.webkit.messageHandlers.voice.postMessage({cmd, ...}) 发回 Lua。
+-->
+<style>
+  :root {
+    --bg: #f5f5f7; --surface: #ffffff; --surface-2: #f0f0f3; --line: rgba(0,0,0,.08);
+    --ink: #1d1d1f; --ink-2: #57575c; --ink-3: #8e8e93;
+    --accent: #e5484d; --accent-soft: rgba(229,72,77,.10);
+    --bar: #6e8fd6; --bar-hover: #4f74c8; --ok: #2f9e58; --warn: #c9791b;
+    --radius: 12px;
+    /* 模型配色：标准分类色板前几个槽位，已用校验脚本验过色盲可分（浅/深色各一套） */
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #4a3aa7;
+    --s-unknown: #b8b8be;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161618; --surface: #1f1f22; --surface-2: #28282c; --line: rgba(255,255,255,.08);
+      --ink: #f2f2f4; --ink-2: #b4b4bb; --ink-3: #7c7c84;
+      --accent: #ff5f57; --accent-soft: rgba(255,95,87,.14);
+      --bar: #7f9ee0; --bar-hover: #a3bbef; --ok: #4cc27a; --warn: #e3a04a;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #9085e9;
+      --s-unknown: #55555c;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none;
+  }
+  header {
+    position: sticky; top: 0; z-index: 5; background: var(--bg);
+    display: flex; align-items: center; justify-content: center; padding: 14px 20px 10px;
+  }
+  .seg { display: inline-flex; background: var(--surface-2); border-radius: 9px; padding: 2px; }
+  .seg button {
+    border: 0; background: transparent; color: var(--ink-2); font: inherit; font-weight: 500;
+    padding: 5px 18px; border-radius: 7px; cursor: default;
+  }
+  .seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+  main { padding: 6px 20px 24px; }
+  section { display: none; } section.on { display: block; }
+
+  /* 记录 */
+  .toolbar { display: flex; gap: 8px; align-items: center; margin: 4px 0 12px; }
+  .search {
+    flex: 1; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 8px; padding: 6px 10px; font: inherit; outline: none;
+  }
+  .search:focus { border-color: var(--bar); }
+  .item {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 12px 14px; margin-bottom: 10px;
+  }
+  .meta { display: flex; gap: 8px; align-items: center; color: var(--ink-3); font-size: 12px; }
+  .meta .tag { background: var(--accent-soft); color: var(--accent); border-radius: 5px; padding: 0 6px; }
+  .text {
+    margin: 6px 0 10px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+    user-select: text; -webkit-user-select: text; cursor: text;
+  }
+  .text.empty { color: var(--ink-3); font-style: italic; }
+  .actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .btn {
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+    border-radius: 7px; padding: 3px 10px; font: inherit; font-size: 12px; cursor: default;
+  }
+  .btn:hover { filter: brightness(0.97); }
+  .btn.primary { background: var(--bar); border-color: transparent; color: #fff; }
+  .btn:disabled { opacity: .55; }
+  select {
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+    border-radius: 7px; padding: 2px 6px; font: inherit; font-size: 12px;
+  }
+  .flash { color: var(--ok); font-size: 12px; }
+  .err { color: var(--accent); font-size: 12px; }
+  .empty-state { text-align: center; color: var(--ink-3); padding: 60px 0; }
+
+  /* 统计 */
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 4px 0 14px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+  .tile .k { color: var(--ink-3); font-size: 12px; }
+  .tile .v { font-size: 26px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .tile .v small { font-size: 13px; font-weight: 500; color: var(--ink-2); margin-left: 2px; }
+  .tile .d { color: var(--ink-3); font-size: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+  .card-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .card-h h3 { margin: 0; font-size: 13px; font-weight: 600; }
+  .seg.small button { padding: 2px 10px; font-size: 12px; }
+  .chart { position: relative; height: 180px; display: flex; align-items: flex-end; gap: 6px;
+           border-bottom: 1px solid var(--line); padding-top: 18px; }
+  .col { flex: 1; height: 100%; display: flex; align-items: flex-end; justify-content: center; position: relative; }
+  .stack { width: 70%; max-width: 26px; display: flex; flex-direction: column-reverse; gap: 2px; height: 100%; justify-content: flex-start; }
+  .seg-bar { width: 100%; min-height: 0; transition: height .25s ease; }
+  .stack .seg-bar:last-child { border-radius: 4px 4px 0 0; } /* 最上面一段圆角 */
+  .col:hover .stack { filter: brightness(1.08); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 2px 0 8px; color: var(--ink-2); font-size: 12px; }
+  .legend i, .mt i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .mt { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .mt th { text-align: right; color: var(--ink-3); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .mt td { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--line); color: var(--ink); }
+  .mt th:first-child, .mt td:first-child { text-align: left; }
+  .mt tr:last-child td { border-bottom: 0; }
+  .mt .name { font-family: ui-monospace, Menlo, monospace; }
+  .pill { font-size: 11px; border-radius: 5px; padding: 1px 6px; }
+  .pill.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+  .pill.cool { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  .note { color: var(--ink-3); font-size: 11px; margin-top: 8px; line-height: 1.5; }
+  .xlab { display: flex; gap: 6px; margin-top: 6px; }
+  .xlab span { flex: 1; text-align: center; color: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .tip {
+    position: absolute; pointer-events: none; background: var(--ink); color: var(--bg);
+    font-size: 12px; padding: 7px 10px; border-radius: 8px; white-space: nowrap;
+    opacity: 0; transition: opacity .1s;
+    font-variant-numeric: tabular-nums; line-height: 1.6; z-index: 5;
+  }
+  .tip .th { font-weight: 600; margin-bottom: 3px; }
+  .tip .tr { display: flex; align-items: center; gap: 6px; }
+  .tip .tr i { width: 8px; height: 8px; border-radius: 2px; flex: none; box-shadow: 0 0 0 1px var(--bg); }
+  .tip .tr .n { flex: 1; opacity: .8; margin-right: 14px; }
+  .tip .tf { margin-top: 3px; padding-top: 3px; border-top: 1px solid color-mix(in srgb, var(--bg) 25%, transparent); opacity: .8; }
+  .totals { color: var(--ink-3); font-size: 12px; margin-top: 12px; }
+
+  /* 设置 */
+  .field { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; }
+  .field label.t { display: block; font-weight: 600; margin-bottom: 2px; }
+  .field .hint { color: var(--ink-3); font-size: 12px; margin-bottom: 8px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .input {
+    flex: 1; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+    border-radius: 7px; padding: 5px 9px; font: inherit; outline: none; user-select: text; -webkit-user-select: text;
+  }
+  .input:focus { border-color: var(--bar); }
+  .models .m { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line); }
+  .models .m:first-child { border-top: 0; }
+  .models .m .name { flex: 1; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .models .m.off .name { color: var(--ink-3); }
+  .models .m .mnote { font-family: -apple-system, system-ui, sans-serif; font-size: 11px; color: var(--ink-3); margin-left: 6px; }
+  .icon-btn { border: 0; background: transparent; color: var(--ink-2); font-size: 13px; padding: 2px 6px; border-radius: 5px; }
+  .icon-btn:hover { background: var(--surface-2); }
+  .savebar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="seg" id="tabs">
+    <button data-tab="records" class="on">记录</button>
+    <button data-tab="stats">统计</button>
+    <button data-tab="settings">设置</button>
+  </div>
+</header>
+<main>
+  <section id="records" class="on">
+    <div class="toolbar">
+      <input class="search" id="q" placeholder="搜索转写内容">
+      <button class="btn" onclick="send({cmd:'openFolder'})">录音文件夹</button>
+    </div>
+    <div id="list"></div>
+  </section>
+
+  <section id="stats">
+    <div class="tiles" id="tiles"></div>
+    <div class="card">
+      <div class="card-h">
+        <h3>最近 14 天</h3>
+        <div class="seg small" id="metric">
+          <button data-m="count" class="on">次数</button>
+          <button data-m="chars">字数</button>
+          <button data-m="secs">时长</button>
+        </div>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="chart" id="chart"><div class="tip" id="tip"></div></div>
+      <div class="xlab" id="xlab"></div>
+      <div class="totals" id="totals"></div>
+    </div>
+    <div class="card" style="margin-top:10px">
+      <div class="card-h"><h3>按模型 · 今天</h3></div>
+      <table class="mt" id="mtable"></table>
+      <div class="note">花费按阿里云标价估算：qwen3-asr-flash ¥0.00022/秒录音；qwen-plus（转写后校对标点和口头语）
+        输入 ¥0.8、输出 ¥2 每百万 Token。账户余额和实际账单看 bailian.console.aliyun.com。<br>
+        Gemini 的额度上限来自它的限额报错（触发过一次才知道），「估计剩余」= 上限 − 今天的请求数，仅供参考。</div>
+    </div>
+  </section>
+
+  <section id="settings">
+    <div class="field">
+      <label class="t">阿里云百炼 API Key</label>
+      <div class="hint" id="keyHint-qwen"></div>
+      <div class="row">
+        <input class="input" id="key-qwen" type="password" placeholder="粘贴新的 Key；留空则保持不变" autocomplete="off">
+        <button class="btn" onclick="toggleKey('qwen')" id="keyEye-qwen">显示</button>
+        <button class="btn" onclick="testKey('qwen')" id="testBtn-qwen">测试连接</button>
+      </div>
+      <div id="testMsg-qwen" style="margin-top:6px"></div>
+    </div>
+    <div class="field">
+      <label class="t">Gemini API Key</label>
+      <div class="hint" id="keyHint-gemini"></div>
+      <div class="row">
+        <input class="input" id="key-gemini" type="password" placeholder="粘贴新的 Key；留空则保持不变" autocomplete="off">
+        <button class="btn" onclick="toggleKey('gemini')" id="keyEye-gemini">显示</button>
+        <button class="btn" onclick="testKey('gemini')" id="testBtn-gemini">测试连接</button>
+      </div>
+      <div id="testMsg-gemini" style="margin-top:6px"></div>
+    </div>
+    <div class="field">
+      <label class="t">模型顺序</label>
+      <div class="hint">勾选要用的模型，从上往下试；前一个出错或额度用完，自动换下一个。</div>
+      <div class="models" id="models"></div>
+      <div class="row" style="margin-top:8px">
+        <input class="input" id="newModel" placeholder="添加模型，例如 qwen3-asr-flash、gemini-2.5-pro">
+        <button class="btn" onclick="addModel()">添加</button>
+      </div>
+    </div>
+    <div class="field">
+      <label class="t">常用词</label>
+      <div class="hint">一行一个词：写进 prompt，让模型按这个写法输出。「错误写法 =&gt; 正确写法」：转写后自动替换。以 # 开头是注释。</div>
+      <textarea class="input" id="vocab" spellcheck="false"
+        style="width:100%;height:220px;resize:vertical;font:12px/1.5 ui-monospace,Menlo,monospace"></textarea>
+    </div>
+    <div class="field">
+      <label class="t">麦克风</label>
+      <div class="hint">按名字匹配，插拔其他声卡也不会选错。</div>
+      <div class="row"><select id="mic" style="flex:1"></select></div>
+    </div>
+    <div class="field">
+      <label class="t">触发键</label>
+      <div class="hint">按住说话，松开转写；轻点开始，再点结束。</div>
+      <div class="row">
+        <div style="flex:1" id="trigger"></div>
+        <button class="btn" onclick="send({cmd:'setTrigger'})">修改…</button>
+      </div>
+    </div>
+    <div class="field">
+      <label class="t">保留最近几段录音</label>
+      <div class="hint">录音结束（包括取消、出错）都会先存一份，方便重新转写。</div>
+      <div class="row"><input class="input" id="keep" type="number" min="3" max="100" style="max-width:100px"></div>
+    </div>
+    <div class="savebar"><span id="saveMsg"></span><button class="btn primary" onclick="save()">保存</button></div>
+  </section>
+</main>
+
+<script>
+const send = (m) => window.webkit.messageHandlers.voice.postMessage(m);
+let DATA = null, metric = "count", models = [], busy = {};
+
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll("section").forEach(s => s.classList.toggle("on", s.id === b.dataset.tab));
+});
+document.querySelectorAll("#metric button").forEach(b => b.onclick = () => {
+  metric = b.dataset.m;
+  document.querySelectorAll("#metric button").forEach(x => x.classList.toggle("on", x === b));
+  renderChart();
+});
+document.getElementById("q").oninput = renderList;
+
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function fmtWhen(at) {
+  const d = new Date(at.replace(" ", "T")), now = new Date();
+  const hm = at.slice(11, 16);
+  const days = Math.floor((new Date(now.toDateString()) - new Date(d.toDateString())) / 864e5);
+  if (days === 0) return "今天 " + hm;
+  if (days === 1) return "昨天 " + hm;
+  return at.slice(5, 10) + " " + hm;
+}
+function fmtDur(s) { s = Math.round(s || 0); return s < 60 ? s + " 秒" : Math.floor(s / 60) + " 分 " + (s % 60) + " 秒"; }
+// 花费一次才几厘钱，保留到够看出变化的位数
+function yuan(v) { v = v || 0; return v === 0 ? "0" : v < 0.01 ? v.toFixed(4) : v < 1 ? v.toFixed(3) : v.toFixed(2); }
+function fmtMin(s) { const m = (s || 0) / 60; return m < 10 ? m.toFixed(1) : Math.round(m); }
+
+window.app = {
+  render(d) {
+    DATA = d;
+    // 已启用的按设置顺序在前，其余已知模型没勾选、排在后面
+    models = d.settings.models.map(n => ({ name: n, on: true }));
+    for (const k of d.settings.knownModels || []) if (!models.some(m => m.name === k.name)) models.push({ name: k.name, on: false });
+    renderList(); renderStats(); renderSettings();
+  },
+  onRetranscribed(id, r) {
+    busy[id] = false;
+    const it = DATA.items.find(x => x.id === id);
+    if (r.ok) { it.text = r.text; it.model = r.model || it.model; it.flash = "已更新"; }
+    else it.error = r.err;
+    renderList();
+    setTimeout(() => { it.flash = null; it.error = null; renderList(); }, 4000);
+  },
+  onTest(p, r) {
+    document.getElementById("testBtn-" + p).disabled = false;
+    document.getElementById("testMsg-" + p).innerHTML = r.ok ? `<span class="flash">✓ ${esc(r.msg)}</span>` : `<span class="err">${esc(r.msg)}</span>`;
+  },
+  onSaved(msg) { const el = document.getElementById("saveMsg"); el.innerHTML = `<span class="flash">✓ ${esc(msg)}</span>`; setTimeout(() => el.innerHTML = "", 2500); },
+  onCopied(id) { const it = DATA.items.find(x => x.id === id); if (it) { it.flash = "已复制"; renderList(); setTimeout(() => { it.flash = null; renderList(); }, 1500); } },
+};
+
+/* ---------- 记录 ---------- */
+function renderList() {
+  if (!DATA) return;
+  const q = document.getElementById("q").value.trim();
+  const items = DATA.items.filter(it => !q || (it.text || "").includes(q));
+  const el = document.getElementById("list");
+  if (!items.length) { el.innerHTML = `<div class="empty-state">${q ? "没有匹配的记录" : "还没有记录，按住触发键说句话试试"}</div>`; return; }
+  const opts = [`<option value="">自动（按顺序）</option>`].concat(DATA.settings.models.map(m => `<option>${esc(m)}</option>`)).join("");
+  el.innerHTML = items.map(it => `
+    <div class="item">
+      <div class="meta">
+        <span>${fmtWhen(it.at)}</span>
+        ${it.dur ? `<span>· ${fmtDur(it.dur)}</span>` : ""}
+        ${it.model ? `<span>· ${esc(it.model)}</span>` : ""}
+        ${!it.text && it.audio ? `<span class="tag">未转写</span>` : ""}
+      </div>
+      <div class="text ${it.text ? "" : "empty"}">${it.text ? esc(it.text) : "这段录音还没有转写结果"}</div>
+      <div class="actions">
+        ${it.text ? `<button class="btn" onclick="copy(${it.id})">复制</button>` : ""}
+        ${it.audio ? `
+          <button class="btn" onclick="send({cmd:'play',path:${JSON.stringify(it.audio)}})">播放</button>
+          <button class="btn" ${busy[it.id] ? "disabled" : ""} onclick="retr(${it.id})">${busy[it.id] ? "转写中…" : "重新转写"}</button>
+          <select id="m${it.id}">${opts}</select>
+          <button class="btn" onclick="send({cmd:'reveal',path:${JSON.stringify(it.audio)}})">在 Finder 中显示</button>` : ""}
+        ${it.flash ? `<span class="flash">✓ ${esc(it.flash)}</span>` : ""}
+        ${it.error ? `<span class="err">${esc(it.error)}</span>` : ""}
+      </div>
+    </div>`).join("");
+}
+function copy(id) { const it = DATA.items.find(x => x.id === id); send({ cmd: "copy", id, text: it.text }); }
+function retr(id) {
+  const it = DATA.items.find(x => x.id === id);
+  busy[id] = true; renderList();
+  send({ cmd: "retranscribe", id, path: it.audio, model: document.getElementById("m" + id)?.value || "" });
+}
+
+/* ---------- 统计 ---------- */
+function renderStats() {
+  const s = DATA.stats, t = s.today, y = s.yesterday;
+  const diff = (a, b, unit) => b ? `昨天 ${b}${unit}` : "昨天没有使用";
+  document.getElementById("tiles").innerHTML = `
+    <div class="tile"><div class="k">今天 · 次数</div><div class="v">${t.count}<small>次</small></div><div class="d">${diff(t.count, y.count, " 次")}</div></div>
+    <div class="tile"><div class="k">今天 · 字数</div><div class="v">${t.chars}<small>字</small></div><div class="d">${diff(t.chars, y.chars, " 字")}</div></div>
+    <div class="tile"><div class="k">今天 · 录音时长</div><div class="v">${fmtMin(t.secs)}<small>分钟</small></div><div class="d">${diff(t.secs, y.secs ? fmtMin(y.secs) : 0, " 分钟")}</div></div>
+    <div class="tile"><div class="k">今天 · 花费</div><div class="v"><small style="margin:0 1px 0 0">¥</small>${yuan(s.cost.today)}</div><div class="d">本月 ¥${yuan(s.cost.month)} · 累计 ¥${yuan(s.cost.total)}</div></div>`;
+  const tot = s.total;
+  document.getElementById("totals").textContent =
+    `累计 ${tot.count} 次 · ${tot.chars} 字 · 录音 ${fmtMin(tot.secs)} 分钟` + (s.estimated ? "（早期记录没存时长，按语速估算）" : "");
+  renderChart();
+}
+// 颜色跟着模型名走（不跟排名/顺序）：常用的三个模型固定色，其他按首次出现依次取后面的槽位
+const FIXED = { "gemini-3-flash-preview": "--s1", "gemini-2.5-flash": "--s2", "gemini-2.5-flash-lite": "--s3", "qwen3-asr-flash": "--s4", "local-qwen3-asr-1.7b": "--s5" };
+const colorOf = (() => {
+  const extra = {}; let next = 4;
+  return name => {
+    if (name === "未记录模型") return "var(--s-unknown)";
+    if (FIXED[name]) return `var(${FIXED[name]})`;
+    if (!extra[name]) extra[name] = next <= 6 ? `--s${next++}` : "--s-unknown";
+    return `var(${extra[name]})`;
+  };
+})();
+
+function renderChart() {
+  const days = DATA.stats.days, chart = document.getElementById("chart"), tip = document.getElementById("tip");
+  const models = DATA.stats.models.map(m => m.name);
+  const mval = (m) => metric === "secs" ? (m?.secs || 0) / 60 : (m?.[metric] || 0);
+  const val = d => metric === "secs" ? d.secs / 60 : d[metric];
+  const max = Math.max(1, ...days.map(val));
+  const unit = { count: "次", chars: "字", secs: "分钟" }[metric];
+  const used = models.filter(n => days.some(d => d.byModel?.[n]));
+  document.getElementById("legend").innerHTML = used.map(n => `<span><i style="background:${colorOf(n)}"></i>${esc(n)}</span>`).join("");
+  chart.querySelectorAll(".col").forEach(c => c.remove());
+  days.forEach(d => {
+    const col = document.createElement("div"); col.className = "col";
+    const stack = document.createElement("div"); stack.className = "stack";
+    stack.style.height = (val(d) / max * 100) + "%";
+    const total = val(d) || 1;
+    used.forEach(n => {
+      const v = mval(d.byModel?.[n]);
+      if (!v) return;
+      const seg = document.createElement("div"); seg.className = "seg-bar";
+      seg.style.background = colorOf(n);
+      seg.style.flex = `${v / total} 1 0`;
+      stack.appendChild(seg);
+    });
+    col.appendChild(stack);
+    col.onmouseenter = () => {
+      const fmt = v => metric === "secs" ? (v).toFixed(1) : Math.round(v);
+      // 按模型一行一个，色块和柱子颜色对应，数量多的在上面（和柱子从上到下的顺序无关，只按大小）
+      const rows = used.filter(n => d.byModel?.[n]).map(n => [n, mval(d.byModel[n])]).sort((a, b) => b[1] - a[1])
+        .map(([n, v]) => `<div class="tr"><i style="background:${colorOf(n)}"></i><span class="n">${esc(n)}</span><span>${fmt(v)} ${unit}</span></div>`);
+      const [mo, dd] = d.date.slice(5).split("-").map(Number);
+      tip.innerHTML = `<div class="th">${mo}月${dd}日 · 共 ${fmt(val(d))} ${unit}</div>` + rows.join("") +
+        (d.cost ? `<div class="tf">花费约 ¥${yuan(d.cost)}（按标价估算）</div>` : "");
+      // 柱子上方放得下就放上方居中；放不下就贴在柱子旁边（右半边的柱子放左侧），不盖住柱子
+      const r = col.getBoundingClientRect(), cr = chart.getBoundingClientRect();
+      const tw = tip.offsetWidth, th = tip.offsetHeight, top = stack.getBoundingClientRect().top - cr.top;
+      const mid = r.left - cr.left + r.width / 2, sw = stack.offsetWidth / 2 + 6;
+      if (top - 6 >= th) {
+        tip.style.left = Math.min(cr.width - tw, Math.max(0, mid - tw / 2)) + "px";
+        tip.style.top = (top - 6 - th) + "px";
+      } else {
+        tip.style.left = (mid > cr.width / 2 ? mid - sw - tw : mid + sw) + "px";
+        tip.style.top = "0px";
+      }
+      tip.style.opacity = 1;
+    };
+    col.onmouseleave = () => tip.style.opacity = 0;
+    chart.appendChild(col);
+  });
+  renderModelTable();
+  document.getElementById("xlab").innerHTML = days.map((d, i) =>
+    `<span>${i % 2 === days.length % 2 ? "" : d.date.slice(8).replace(/^0/, "")}</span>`).join("");
+}
+
+function renderModelTable() {
+  const rows = DATA.stats.models.filter(m => !m.unknown);
+  document.getElementById("mtable").innerHTML = `
+    <tr><th>模型</th><th>成功转写</th><th>调用</th><th>花费</th><th>被限额</th><th>上限</th><th>估计剩余</th><th>状态</th></tr>` +
+    rows.map(m => `<tr>
+      <td><i style="background:${colorOf(m.name)}"></i><span class="name">${esc(m.name)}</span></td>
+      <td>${m.todayOk}</td><td>${m.calls}</td>
+      <td>${m.paid ? "¥" + yuan(m.cost) : `<span style="color:var(--ink-3)">免费</span>`}</td><td>${m.limited || "—"}</td>
+      <td>${m.limit ? `${m.limit} 次/${m.limitUnit || "?"}` : `<span style="color:var(--ink-3)">未知</span>`}</td>
+      <td>${m.remaining != null ? "约 " + m.remaining : "—"}</td>
+      <td>${m.cooling ? `<span class="pill cool">冷却中</span>` : `<span class="pill ok">可用</span>`}</td>
+    </tr>`).join("");
+}
+
+/* ---------- 设置 ---------- */
+function renderSettings() {
+  const st = DATA.settings;
+  document.getElementById("keyHint-qwen").textContent = st.dsMasked
+    ? `当前：${st.dsMasked}（${st.dsSource}）· 默认转写用它` : "还没有设置 Key。到 bailian.console.aliyun.com → API-KEY 创建。";
+  document.getElementById("keyHint-gemini").textContent = st.keyMasked
+    ? `当前：${st.keyMasked}（${st.keySource}）· 备用` : "还没有设置 Key。到 aistudio.google.com 免费申请。";
+  document.getElementById("key-qwen").value = "";
+  document.getElementById("key-gemini").value = "";
+  document.getElementById("trigger").textContent = st.trigger;
+  document.getElementById("keep").value = st.keep;
+  document.getElementById("vocab").value = st.vocab || "";
+  const mic = document.getElementById("mic");
+  const devs = st.devices.slice();
+  if (st.mic && !devs.some(d => d.toLowerCase().includes(st.mic.toLowerCase()))) devs.unshift(st.mic + "（未连接）");
+  mic.innerHTML = devs.map(d => {
+    const selected = st.mic && d.toLowerCase().includes(st.mic.toLowerCase());
+    return `<option value="${esc(d.replace("（未连接）", ""))}" ${selected ? "selected" : ""}>${esc(d)}</option>`;
+  }).join("") || `<option value="">没有检测到麦克风</option>`;
+  renderModels();
+}
+function renderModels() {
+  document.getElementById("models").innerHTML = models.map((m, i) => `
+    <div class="m ${m.on ? "" : "off"}">
+      <input type="checkbox" ${m.on ? "checked" : ""} onchange="models[${i}].on=this.checked;renderModels()">
+      <span class="name">${esc(m.name)}${(k => k ? ` <span class="mnote">${esc(k.provider)} · ${esc(k.note)}</span>` : "")((DATA.settings.knownModels || []).find(k => k.name === m.name))}</span>
+      <button class="icon-btn" ${i === 0 ? "disabled" : ""} onclick="mv(${i},-1)">↑</button>
+      <button class="icon-btn" ${i === models.length - 1 ? "disabled" : ""} onclick="mv(${i},1)">↓</button>
+      <button class="icon-btn" onclick="models.splice(${i},1);renderModels()">✕</button>
+    </div>`).join("");
+}
+function mv(i, d) { const [m] = models.splice(i, 1); models.splice(i + d, 0, m); renderModels(); }
+function addModel() {
+  const el = document.getElementById("newModel"), n = el.value.trim();
+  if (n && !models.some(m => m.name === n)) models.push({ name: n, on: true });
+  el.value = ""; renderModels();
+}
+function toggleKey(p) {
+  const k = document.getElementById("key-" + p), b = document.getElementById("keyEye-" + p);
+  k.type = k.type === "password" ? "text" : "password"; b.textContent = k.type === "password" ? "显示" : "隐藏";
+}
+function testKey(p) {
+  document.getElementById("testBtn-" + p).disabled = true;
+  document.getElementById("testMsg-" + p).innerHTML = `<span style="color:var(--ink-3)">测试中…</span>`;
+  send({ cmd: "testKey", provider: p, key: document.getElementById("key-" + p).value.trim() });
+}
+function save() {
+  const enabled = models.filter(m => m.on).map(m => m.name);
+  if (!enabled.length) { document.getElementById("saveMsg").innerHTML = `<span class="err">至少保留一个模型</span>`; return; }
+  send({ cmd: "saveSettings", settings: {
+    api_key: document.getElementById("key-gemini").value.trim(),
+    dashscope_key: document.getElementById("key-qwen").value.trim(),
+    models: enabled,
+    mic: document.getElementById("mic").value,
+    keep: Math.max(3, Math.min(100, parseInt(document.getElementById("keep").value) || 10)),
+    vocab: document.getElementById("vocab").value,
+  }});
+}
+send({ cmd: "ready" });
+</script>
+</body>
+</html>
