@@ -10,4 +10,6 @@ busy() {
 if busy; then print -u2 "正在录音或转写，没有重启"; exit 1; fi
 pkill -x Hammerspoon
 for i in {1..20}; do pgrep -x Hammerspoon >/dev/null || break; sleep 0.2; done
-open -a Hammerspoon && print "已重启"
+# 刚杀掉马上 open 偶尔报 LSOpenURLs 错误 -600（上一个进程还没被系统登记为退出），隔一秒重试
+for i in {1..5}; do open -a Hammerspoon 2>/dev/null && { print "已重启"; exit 0 }; sleep 1; done
+print -u2 "Hammerspoon 没能重新打开，手动打开一下"; exit 1
