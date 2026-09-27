@@ -321,15 +321,17 @@ function renderList() {
       <div class="actions">
         ${it.text ? `<button class="btn" onclick="copy(${it.id})">复制</button>` : ""}
         ${it.audio ? `
-          <button class="btn" onclick="send({cmd:'play',path:${JSON.stringify(it.audio)}})">播放</button>
+          <button class="btn" onclick="audioCmd('play', ${it.id})">播放</button>
           <button class="btn" ${busy[it.id] ? "disabled" : ""} onclick="retr(${it.id})">${busy[it.id] ? "转写中…" : "重新转写"}</button>
           <select id="m${it.id}">${opts}</select>
-          <button class="btn" onclick="send({cmd:'reveal',path:${JSON.stringify(it.audio)}})">在 Finder 中显示</button>` : ""}
+          <button class="btn" onclick="audioCmd('reveal', ${it.id})">在 Finder 中显示</button>` : ""}
         ${it.flash ? `<span class="flash">✓ ${esc(it.flash)}</span>` : ""}
         ${it.error ? `<span class="err">${esc(it.error)}</span>` : ""}
       </div>
     </div>`).join("");
 }
+// 路径不直接写进 onclick：JSON 字符串的双引号会把 onclick="…" 截断，按钮点了没反应
+function audioCmd(cmd, id) { const it = DATA.items.find(x => x.id === id); send({ cmd, path: it.audio }); }
 function copy(id) { const it = DATA.items.find(x => x.id === id); send({ cmd: "copy", id, text: it.text }); }
 function retr(id) {
   const it = DATA.items.find(x => x.id === id);
