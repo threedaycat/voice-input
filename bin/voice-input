@@ -51,10 +51,14 @@ MIC_EXPLICIT=${MIC_PATTERN:+1}          # 用户明确选过麦克风，找不�
 # 2025-09-08 就是主模型现在指向的版本（同一段录音转出来一字不差），放第一。
 # 快照的 usage 不给 seconds 只给音频 token（实测 19.3 秒 = 483 token，约 25 token/秒），按这个折算。
 # 快照在百炼控制台「免费额度」里打开「用完即停」：额度用完直接返回 403，不扣钱，自动换下一个。
+# fun-asr-flash 是另一个听写模型，同样的接口（多要一个顶层 format 字段），也有 10 小时免费额度、
+# 也开了用完即停。实测和 qwen3-asr-flash 转出来几乎一样，只是中英文之间不加空格、语气词多留一些，
+# 校对会处理；它的 usage 不给时长，按录音时长记。其它免费的听写模型（paraformer、fun-asr 等）
+# 只支持异步文件或 WebSocket，这个同步接口调不了（404 Unsupported model）。
 # Gemini 作备用。
 _models="${VOICE_MODEL:-}"
 [[ -n $_models ]] || _models="$(cfg '.models | join(" ")')"
-[[ -n $_models ]] || _models="qwen3-asr-flash-2025-09-08 qwen3-asr-flash-2026-02-10 qwen3-asr-flash gemini-3-flash-preview gemini-2.5-flash local-qwen3-asr-1.7b"
+[[ -n $_models ]] || _models="qwen3-asr-flash-2025-09-08 qwen3-asr-flash-2026-02-10 fun-asr-flash-2026-06-15 qwen3-asr-flash gemini-3-flash-preview gemini-2.5-flash local-qwen3-asr-1.7b"
 MODELS=(${=_models})
 KEEP="${VOICE_KEEP:-}"
 [[ -n $KEEP ]] || KEEP="$(cfg .keep)"
@@ -211,7 +215,10 @@ log_call() {  # log_call <模型> <HTTP 状态码> [附加字段 JSON，如 {"se
 # 阿里云百炼的标价（元），面板算花费用。Gemini 走免费额度，记 0。
 #   qwen3-asr-flash ¥0.00022/秒音频；校对用 qwen-plus，输入 ¥0.8、输出 ¥2 每百万 Token
 PRICE_ASR_PER_SEC=0.00022
-POLISH_MODEL=qwen-plus
+# 校对也按顺序用免费额度：每个版本各 100 万 token。这两个版本在 30 段真实录音上和 qwen-plus
+# 的校对结果相似度 0.99（qwen3.x-plus 只有 0.96，会补字、把「20B」改成「20亿参数」；更早的
+# 日期版本频繁 429）。前两个开了用完即停（403 FreeTierOnly），最后 qwen-plus 用完免费额度后按量付费。
+POLISH_MODELS=(qwen-plus-2025-12-01 qwen-plus-latest qwen-plus)
 PRICE_POLISH_IN=0.0000008
 PRICE_POLISH_OUT=0.000002
 
@@ -313,6 +320,7 @@ call_qwen() {
     base64 -i "$p" -o "$job/part.b64"
     jq -n --arg m "$model" --arg ctx "$ctx" --arg mime "$mime" --rawfile data "$job/part.b64" '{
       model: $m, stream: false,
+      format: ($mime | ltrimstr("audio/") | {mp4: "m4a", mpeg: "mp3"}[.] // .),
       messages: [{role: "system", content: [{type: "text", text: $ctx}]},
                  {role: "user", content: [{type: "input_audio",
                    input_audio: {data: ("data:" + $mime + ";base64," + ($data | gsub("\\s"; "")))}}]}],
@@ -321,9 +329,11 @@ call_qwen() {
     for attempt in 1 2; do
       code=$(curl -sS --noproxy '*' --connect-timeout 4 --max-time $maxt -o "$resp" -w '%{http_code}' \
         "$DASHSCOPE" -H "Authorization: Bearer $key" -H 'Content-Type: application/json' -d @"$req" 2>/dev/null) || code=000
+      # fun-asr 没听到人声时返回 400 ASR_RESPONSE_HAVE_NO_WORDS，当作空结果，别换模型重试
+      [[ $code == 400 ]] && grep -q ASR_RESPONSE_HAVE_NO_WORDS "$resp" 2>/dev/null && { code=200; print '{}' >"$resp" }
       local x='{}'
-      [[ $code == 200 ]] && x=$(jq -c --argjson p $PRICE_ASR_PER_SEC \
-        '(.usage.seconds // ((.usage.prompt_tokens_details.audio_tokens // 0) / 25 | ceil)) as $s | {secs: $s, cost: ($s * $p)}' "$resp" 2>/dev/null || print '{}')
+      [[ $code == 200 ]] && x=$(jq -c --argjson p $PRICE_ASR_PER_SEC --argjson d ${secs:-0} \
+        '(.usage.seconds // (if .usage.prompt_tokens_details.audio_tokens then .usage.prompt_tokens_details.audio_tokens / 25 | ceil else $d end)) as $s | {secs: $s, cost: ($s * $p)}' "$resp" 2>/dev/null || print '{}')
       log_call "$model" "$code" "$x"
       [[ $code == 000 ]] || break
       last_err="连不上阿里云（网络？）"
@@ -363,19 +373,28 @@ polish() {  # stdin 原始识别结果 → stdout 校对后。约 1 秒；失败
   [[ -n $raw ]] || return 0
   local sys="$POLISH_PROMPT" terms; terms=$(vocab_terms)
   [[ -n $terms ]] && sys+=$'\n'"- $VOCAB_HINT$terms"
-  local out="" r=$job/polish.json c
-  c=$(jq -n --arg m $POLISH_MODEL --arg s "$sys" --arg t "$raw" '{model: $m, temperature: 0, enable_thinking: false,
-          messages: [{role: "system", content: $s}, {role: "user", content: ("<asr>" + $t + "</asr>")}]}' \
-    | curl -sS --noproxy '*' --connect-timeout 4 --max-time 15 -o "$r" -w '%{http_code}' "$DASHSCOPE" \
-        -H "Authorization: Bearer $key" -H 'Content-Type: application/json' -d @- 2>/dev/null) || c=000
-  if [[ $c == 200 ]]; then
-    out=$(jq -r '.choices[0].message.content // empty' "$r" 2>/dev/null || true)
-    log_call $POLISH_MODEL 200 "$(jq -c --argjson i $PRICE_POLISH_IN --argjson o $PRICE_POLISH_OUT \
-      '{tokens: (.usage.total_tokens // 0), cost: ((.usage.prompt_tokens // 0) * $i + (.usage.completion_tokens // 0) * $o)}' \
-      "$r" 2>/dev/null || print '{}')"
-  else
-    log_call $POLISH_MODEL "$c"
-  fi
+  local out="" r=$job/polish.json c pm pcool="$STATE_DIR/cooldown"
+  # 和听写共用 cooldown：429 跳过 10 分钟，用完即停的 403 跳过一天（记一个未来的时间）
+  for pm in $POLISH_MODELS; do
+    [[ -f $pcool/$pm && $pm != ${POLISH_MODELS[-1]} ]] && (( EPOCHSECONDS - $(<$pcool/$pm) < 600 )) && continue
+    c=$(jq -n --arg m $pm --arg s "$sys" --arg t "$raw" '{model: $m, temperature: 0, enable_thinking: false,
+            messages: [{role: "system", content: $s}, {role: "user", content: ("<asr>" + $t + "</asr>")}]}' \
+      | curl -sS --noproxy '*' --connect-timeout 4 --max-time 15 -o "$r" -w '%{http_code}' "$DASHSCOPE" \
+          -H "Authorization: Bearer $key" -H 'Content-Type: application/json' -d @- 2>/dev/null) || c=000
+    if [[ $c == 200 ]]; then
+      out=$(jq -r '.choices[0].message.content // empty' "$r" 2>/dev/null || true)
+      log_call $pm 200 "$(jq -c --argjson i $PRICE_POLISH_IN --argjson o $PRICE_POLISH_OUT \
+        '{tokens: (.usage.total_tokens // 0), cost: ((.usage.prompt_tokens // 0) * $i + (.usage.completion_tokens // 0) * $o)}' \
+        "$r" 2>/dev/null || print '{}')"
+      break
+    fi
+    log_call $pm "$c"
+    mkdir -p "$pcool"
+    case $c in
+      429) print -- $EPOCHSECONDS >"$pcool/$pm" ;;
+      403) grep -q FreeTierOnly "$r" 2>/dev/null && print -- $(( EPOCHSECONDS + 86400 )) >"$pcool/$pm" ;;
+    esac
+  done
   out=${out#<asr>}; out=${out%</asr>}
   # 校对只删不加：结果明显变长（多半是在回答问题）或砍掉太多，就不用它
   if [[ -n $out ]] && (( ${#out} > ${#raw} * 13 / 10 + 10 || ${#out} < ${#raw} * 6 / 10 )); then
@@ -445,7 +464,7 @@ transcribe() {  # transcribe <音频文件> [指定模型]
   local model code last_err="" asr_raw=""
   for model in $models; do
     case $model in
-      qwen*)  call_qwen ;;
+      qwen*|fun-asr*) call_qwen ;;
       local*) call_local ;;
       *)      call_gemini ;;
     esac

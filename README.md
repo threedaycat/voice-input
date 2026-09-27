@@ -34,6 +34,10 @@ Speech recognizers often mangle English terms inside Chinese speech (I kept gett
   it still gets wrong.
 - **Fallback chain**: Alibaba Cloud → Gemini (free tier) → an on-device model (works
   offline). Rate-limited or unreachable models are skipped automatically.
+- **Free quota first**: every Bailian model version carries its own new-user free quota.
+  Transcription walks two dated `qwen3-asr-flash` versions and `fun-asr-flash`, proofreading two
+  `qwen-plus` versions, before the pay-as-you-go main models. Turn on "stop when used up" for
+  those in the console's Free Quota page: they then return 403 and the next model takes over.
 
 ## Using it
 
