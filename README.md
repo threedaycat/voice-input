@@ -55,6 +55,9 @@ Speech recognizers often mangle English terms inside Chinese speech (I kept gett
   trailing period — handy for Claude Code.
 - Newlines are stripped before pasting, because Claude Code collapses multi-line pastes
   into `[Pasted text]`.
+- In Claude Code under tmux, the forward mouse button sends End before Return. Bind End to
+  `scroll:bottom` in `~/.claude/keybindings.json` and the button doubles as "jump to the latest
+  message" when the input is empty (Enter on an empty prompt does nothing).
 
 Menu bar mic → **Open panel** to browse history (replay, re-transcribe, copy), see daily
 usage and cost, per-model call stats, and edit keys, model order, microphone and vocabulary.

@@ -50,6 +50,8 @@
 - 整段只说 "compact" 会输出 `/compact`，只说"继续"会输出"继续"（不带句号），
   方便直接对 Claude Code 下命令。
 - 粘贴前会去掉转写里的换行：Claude Code 会把多行的粘贴折叠成 `[Pasted text]`，看不到内容。
+- 在 tmux 里的 Claude Code 上，鼠标前键会先发 End 再回车。在 `~/.claude/keybindings.json` 里把 End
+  绑成 `scroll:bottom`，输入框空着时按前键就是「跳到最新消息」（空输入框回车什么都不做）。
 
 菜单栏麦克风 → **打开面板**：看转写记录（能重听、重新转写、复制）、每天用量和花费、
 按模型的调用情况，设置 Key、模型顺序、麦克风、常用词。
