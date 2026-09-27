@@ -640,23 +640,10 @@ tap:start()
 -- 两个键的原始动作（浏览器后退/前进）都吞掉。菜单里可以关。
 local MOUSE_TALK, MOUSE_ENTER = 3, 4 -- buttonNumber：3 = 后退键，4 = 前进键
 
--- 前键在 tmux 里的 Claude Code 上先发 End 再回车。End 绑成 scroll:bottom 之后（~/.claude/keybindings.json，
--- 见 README），输入框空着时回车什么都不做，于是等于「跳到底」；有字就照常发送，End 不动输入框里的字。
--- 是不是 Claude 看 tmux 当前 pane 的进程名（Claude Code 的进程名是版本号）；别的地方还是普通回车。
-local TMUX = hs.fs.attributes("/opt/homebrew/bin/tmux") and "/opt/homebrew/bin/tmux" or "/usr/local/bin/tmux"
-local TERMINALS = { ["com.googlecode.iterm2"] = true, ["com.apple.Terminal"] = true, ["com.mitchellh.ghostty"] = true }
-local enterTask -- 存住，免得跑到一半被回收
+-- 前键就是回车，哪里都一样。以前在 tmux 里的 Claude Code 上会先发 End（绑成 scroll:bottom）
+-- 兼作「跳到底」，结果只想回车时也被拽到底部，两件事抢一个键，去掉了。
 local function mouseEnter()
-  local app = hs.application.frontmostApplication()
-  if not (app and TERMINALS[app:bundleID()] and hs.fs.attributes(TMUX)) then
-    hs.eventtap.keyStroke({}, "return", 0)
-    return
-  end
-  enterTask = hs.task.new(TMUX, function(code, out)
-    if code == 0 and (out or ""):match("^%d+%.%d+%.%d+%s*$") then hs.eventtap.keyStroke({}, "end", 0) end
-    hs.eventtap.keyStroke({}, "return", 0)
-  end, { "display", "-p", "#{pane_current_command}" })
-  if not enterTask:start() then hs.eventtap.keyStroke({}, "return", 0) end
+  hs.eventtap.keyStroke({}, "return", 0)
 end
 local mouseOn = hs.settings.get("voice.mouseButtons") == true -- 默认关：侧键本来是后退/前进，要用自己在菜单里开
 local BTN = hs.eventtap.event.properties.mouseEventButtonNumber
