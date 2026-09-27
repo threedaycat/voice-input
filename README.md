@@ -50,7 +50,7 @@ Speech recognizers often mangle English terms inside Chinese speech (I kept gett
 | **Tap right Command, speak, tap again** | Same, for longer passages |
 | **Esc** while recording | Cancel (the audio is still kept, recoverable from the menu) |
 | **⌃⌥V** | Picker over the last 40 transcripts; choose one to paste |
-| Mouse **back button** to talk, **forward button** for Return | Optional, enable in the menu |
+| Mouse **back button** to talk, **forward button** for Return, **middle click** to paste | Optional, enable in the menu |
 
 - A small HUD at the bottom of the screen shows elapsed time and a live level meter, plus how
   many earlier clips are still being transcribed — you can keep talking while they finish.

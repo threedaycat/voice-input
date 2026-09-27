@@ -637,8 +637,9 @@ local tap = hs.eventtap.new(
 tap:start()
 
 -- 鼠标侧键：后键（靠近拇指那个）= 触发键，按住说话 / 轻点开始再点结束；前键 = 回车（看过转写没问题再发）。
--- 两个键的原始动作（浏览器后退/前进）都吞掉。菜单里可以关。
-local MOUSE_TALK, MOUSE_ENTER = 3, 4 -- buttonNumber：3 = 后退键，4 = 前进键
+-- 中键（按滚轮）= 粘贴（⌘V）：选中文字大多已经自动复制了，只差粘贴这一步不用再右键找菜单。
+-- 三个键的原始动作（浏览器后退/前进、中键在新标签页打开链接）都吞掉。菜单里可以关。
+local MOUSE_PASTE, MOUSE_TALK, MOUSE_ENTER = 2, 3, 4 -- buttonNumber：2 = 中键，3 = 后退键，4 = 前进键
 
 -- 前键就是回车，哪里都一样。以前在 tmux 里的 Claude Code 上会先发 End（绑成 scroll:bottom）
 -- 兼作「跳到底」，结果只想回车时也被拽到底部，两件事抢一个键，去掉了。
@@ -653,9 +654,11 @@ local mouseTap = hs.eventtap.new(
     if not mouseOn then return false end
     local b = e:getProperty(BTN)
     if e:getType() == hs.eventtap.event.types.otherMouseDown then log.i("mouse button " .. b) end
-    if b ~= MOUSE_TALK and b ~= MOUSE_ENTER then return false end
+    if b ~= MOUSE_TALK and b ~= MOUSE_ENTER and b ~= MOUSE_PASTE then return false end
     local down = e:getType() == hs.eventtap.event.types.otherMouseDown
-    if b == MOUSE_TALK then
+    if b == MOUSE_PASTE then
+      if down then hs.eventtap.keyStroke({ "cmd" }, "v", 0) end
+    elseif b == MOUSE_TALK then
       if down then triggerDown("mouse") else triggerUp() end
     elseif down then
       mouseEnter()
@@ -670,7 +673,7 @@ _G.voiceMouseTap = mouseTap
 local function toggleMouse()
   mouseOn = not mouseOn
   hs.settings.set("voice.mouseButtons", mouseOn)
-  hudMessage(mouseOn and "鼠标侧键已开启 · 后键说话，前键回车" or "鼠标侧键已关闭，恢复后退/前进")
+  hudMessage(mouseOn and "鼠标按键已开启 · 后键说话，前键回车，中键粘贴" or "鼠标按键已关闭，恢复后退/前进/中键")
 end
 -- 启动时清掉上次可能残留的录音进程（录到一半重载配置/重启 Hammerspoon 会留下）。
 run({ "cancel" })
@@ -773,7 +776,7 @@ menu:setMenu(function()
     { title = "打开面板（记录 · 统计 · 设置）", fn = panel.open },
     { title = "-" },
     { title = "设置触发键…", fn = startCapture },
-    { title = "鼠标侧键：后键说话、前键回车", checked = mouseOn, fn = function() toggleMouse() end },
+    { title = "鼠标按键：后键说话、前键回车、中键粘贴", checked = mouseOn, fn = function() toggleMouse() end },
     { title = "最近的转写（粘贴）  ⌃⌥V", fn = showPicker },
     { title = "重新转写最近一段", fn = retry },
     { title = "最近的录音", menu = recentMenu() },
