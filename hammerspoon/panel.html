@@ -184,8 +184,9 @@
     <div class="card" style="margin-top:10px">
       <div class="card-h"><h3>按模型 · 今天</h3></div>
       <table class="mt" id="mtable"></table>
-      <div class="note">花费按阿里云标价估算：qwen3-asr-flash ¥0.00022/秒录音；qwen-plus（转写后校对标点和口头语）
-        输入 ¥0.8、输出 ¥2 每百万 Token。账户余额和实际账单看 bailian.console.aliyun.com。<br>
+      <div class="note">「实际扣费」来自阿里云账单（~/.local/state/voice-input/billing.json，要有脚本定时写入），账单按天出、会晚几个小时，
+        免费额度内的调用是 ¥0。没有这个文件时按标价估算：qwen3-asr-flash ¥0.00022/秒录音；qwen-plus（转写后校对）
+        输入 ¥0.8、输出 ¥2 每百万 Token。<br>
         Gemini 的额度上限来自它的限额报错（触发过一次才知道），「估计剩余」= 上限 − 今天的请求数，仅供参考。</div>
     </div>
   </section>
@@ -347,7 +348,9 @@ function renderStats() {
     <div class="tile"><div class="k">今天 · 次数</div><div class="v">${t.count}<small>次</small></div><div class="d">${diff(t.count, y.count, " 次")}</div></div>
     <div class="tile"><div class="k">今天 · 字数</div><div class="v">${t.chars}<small>字</small></div><div class="d">${diff(t.chars, y.chars, " 字")}</div></div>
     <div class="tile"><div class="k">今天 · 录音时长</div><div class="v">${fmtMin(t.secs)}<small>分钟</small></div><div class="d">${diff(t.secs, y.secs ? fmtMin(y.secs) : 0, " 分钟")}</div></div>
-    <div class="tile"><div class="k">今天 · 花费</div><div class="v"><small style="margin:0 1px 0 0">¥</small>${yuan(s.cost.today)}</div><div class="d">本月 ¥${yuan(s.cost.month)} · 累计 ¥${yuan(s.cost.total)}</div></div>`;
+    ${s.billing ? `<div class="tile"><div class="k">今天 · 实际扣费</div><div class="v"><small style="margin:0 1px 0 0">¥</small>${yuan(s.billing.today)}</div>
+      <div class="d">本月 ¥${yuan(s.billing.month)} · 标价折算 ¥${yuan(s.cost.month)}（免费额度内不扣）<br>阿里云账单，截至 ${esc((s.billing.at || "").slice(5))}</div></div>`
+    : `<div class="tile"><div class="k">今天 · 花费（估算）</div><div class="v"><small style="margin:0 1px 0 0">¥</small>${yuan(s.cost.today)}</div><div class="d">本月 ¥${yuan(s.cost.month)} · 累计 ¥${yuan(s.cost.total)}，按标价算，没扣免费额度</div></div>`}`;
   const tot = s.total;
   document.getElementById("totals").textContent =
     `累计 ${tot.count} 次 · ${tot.chars} 字 · 录音 ${fmtMin(tot.secs)} 分钟` + (s.estimated ? "（早期记录没存时长，按语速估算）" : "");
@@ -396,7 +399,7 @@ function renderChart() {
         .map(([n, v]) => `<div class="tr"><i style="background:${colorOf(n)}"></i><span class="n">${esc(n)}</span><span>${fmt(v)} ${unit}</span></div>`);
       const [mo, dd] = d.date.slice(5).split("-").map(Number);
       tip.innerHTML = `<div class="th">${mo}月${dd}日 · 共 ${fmt(val(d))} ${unit}</div>` + rows.join("") +
-        (d.cost ? `<div class="tf">花费约 ¥${yuan(d.cost)}（按标价估算）</div>` : "");
+        (d.billed != null ? `<div class="tf">实际扣费 ¥${yuan(d.billed)}${d.cost ? ` · 标价折算 ¥${yuan(d.cost)}` : ""}</div>` : d.cost ? `<div class="tf">花费约 ¥${yuan(d.cost)}（按标价估算）</div>` : "");
       // 柱子上方放得下就放上方居中；放不下就贴在柱子旁边（右半边的柱子放左侧），不盖住柱子
       const r = col.getBoundingClientRect(), cr = chart.getBoundingClientRect();
       const tw = tip.offsetWidth, th = tip.offsetHeight, top = stack.getBoundingClientRect().top - cr.top;
@@ -421,11 +424,11 @@ function renderChart() {
 function renderModelTable() {
   const rows = DATA.stats.models.filter(m => !m.unknown);
   document.getElementById("mtable").innerHTML = `
-    <tr><th>模型</th><th>成功转写</th><th>调用</th><th>花费</th><th>被限额</th><th>上限</th><th>估计剩余</th><th>状态</th></tr>` +
+    <tr><th>模型</th><th>成功转写</th><th>调用</th><th>${DATA.stats.billing ? "实际扣费" : "花费（估算）"}</th><th>被限额</th><th>上限</th><th>估计剩余</th><th>状态</th></tr>` +
     rows.map(m => `<tr>
       <td><i style="background:${colorOf(m.name)}"></i><span class="name">${esc(m.name)}</span></td>
       <td>${m.todayOk}</td><td>${m.calls}</td>
-      <td>${m.paid ? "¥" + yuan(m.cost) : `<span style="color:var(--ink-3)">免费</span>`}</td><td>${m.limited || "—"}</td>
+      <td>${!m.paid ? `<span style="color:var(--ink-3)">免费</span>` : m.billed != null ? `¥${yuan(m.billed)}${m.cost ? `<span style="color:var(--ink-3)"> / 标价 ¥${yuan(m.cost)}</span>` : ""}` : "¥" + yuan(m.cost)}</td><td>${m.limited || "—"}</td>
       <td>${m.limit ? `${m.limit} 次/${m.limitUnit || "?"}` : `<span style="color:var(--ink-3)">未知</span>`}</td>
       <td>${m.remaining != null ? "约 " + m.remaining : "—"}</td>
       <td>${m.cooling ? `<span class="pill cool">冷却中</span>` : `<span class="pill ok">可用</span>`}</td>

@@ -16,6 +16,9 @@ local CONFIG_DIR = HOME .. "/.config/voice-input"
 local CONFIG = CONFIG_DIR .. "/config.json"
 local CALLS = HOME .. "/.local/state/voice-input/calls.jsonl"
 local QUOTA = HOME .. "/.local/state/voice-input/quota.json"
+-- 可选：阿里云真实账单 {"at": "…", "days": {"YYYY-MM-DD": {模型: 元}}}，由外部脚本（比如定时拉 BSS 账单的）写入。
+-- 有这个文件，面板的花费就用真实扣费；没有就只显示按标价的估算
+local BILLING = HOME .. "/.local/state/voice-input/billing.json"
 local COOLDOWN = (os.getenv("TMPDIR") or "/tmp") .. "/voice-input/cooldown"
 local VOCAB = os.getenv("VOICE_VOCAB") or (CONFIG_DIR .. "/vocab.txt") -- 常用词表（可以软链到自己的 dotfiles）
 local DEFAULT_MODELS = { "qwen3-asr-flash-2025-09-08", "qwen3-asr-flash-2026-02-10", "fun-asr-flash-2026-06-15", "qwen3-asr-flash", "gemini-3-flash-preview", "gemini-2.5-flash", "local-qwen3-asr-1.7b" }
@@ -176,6 +179,28 @@ local function buildStats(history, settingsModels)
       calls[c.model] = t
     end
   end
+  -- 真实扣费：只算语音输入自己调过的模型（calls.jsonl 里出现过的）
+  local billing
+  do
+    local f = io.open(BILLING, "r")
+    local ok, b = false, nil
+    if f then ok, b = pcall(hs.json.decode, f:read("a")); f:close() end
+    if ok and type(b) == "table" and type(b.days) == "table" then
+      local mine = {}
+      for _, c in ipairs(readJsonl(CALLS)) do if c.model then mine[c.model] = true end end
+      billing = { at = b.at, today = 0, month = 0, total = 0, byDay = {}, byModel = {} }
+      for day, ms in pairs(b.days) do
+        for m, v in pairs(ms) do
+          if mine[m] and tonumber(v) then
+            billing.total = billing.total + v
+            billing.byDay[day] = (billing.byDay[day] or 0) + v
+            if day:sub(1, 7) == month then billing.month = billing.month + v end
+            if day == today then billing.today = billing.today + v; billing.byModel[m] = (billing.byModel[m] or 0) + v end
+          end
+        end
+      end
+    end
+  end
   local quota = {}
   do
     local f = io.open(QUOTA, "r")
@@ -205,15 +230,16 @@ local function buildStats(history, settingsModels)
       -- 剩余是估算：上限减去今天记录到的非限额请求（Google 没有查询剩余额度的接口）
       remaining = (q and q.limit and perDay) and math.max(0, q.limit - (c.calls - c.limited)) or nil,
       cooling = cooling or false,
-      cost = c.cost, paid = (m:find("^qwen") ~= nil),
+      cost = c.cost, paid = (m:find("^qwen") ~= nil or m:find("^fun%-asr") ~= nil),
+      billed = billing and (billing.byModel[m] or 0) or nil,
     })
   end
 
-  for _, d in ipairs(days) do d.cost = costByDay[d.date] or 0 end
+  for _, d in ipairs(days) do d.cost = costByDay[d.date] or 0; d.billed = billing and (billing.byDay[d.date] or 0) or nil end
 
   local empty = { count = 0, chars = 0, secs = 0 }
   return {
-    days = days, total = total, estimated = estimated, models = models, cost = cost,
+    days = days, total = total, estimated = estimated, models = models, cost = cost, billing = billing,
     today = byDay[today] or empty,
     yesterday = byDay[os.date("%Y-%m-%d", os.time() - 86400)] or empty,
   }
