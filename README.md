@@ -31,7 +31,8 @@ Speech recognizers often mangle English terms inside Chinese speech (I kept gett
   punctuation, normalize English spelling — **never rewrite**. If the output length drifts,
   the proofread is discarded and the raw transcript is used.
 - **Vocabulary list**: tell the model the names you use; `wrong => right` rules patch what
-  it still gets wrong.
+  it still gets wrong. A `vocab.local.txt` next to `vocab.txt` is read too, for words
+  that should stay on this machine when `vocab.txt` lives in shared dotfiles.
 - **Fallback chain**: Alibaba Cloud → Gemini (free tier) → an on-device model (works
   offline). Rate-limited or unreachable models are skipped automatically.
 - **Free quota first**: every Bailian model version carries its own new-user free quota.

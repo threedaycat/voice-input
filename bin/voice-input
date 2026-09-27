@@ -78,10 +78,19 @@ $RULES"
 VOCAB_HINT='参考词表（只在确实听到发音相近的词时按这里的写法输出，没听到就不要用）：'
 # 常用词表：普通行写进 prompt；"错误 => 正确"的行在转写后逐条替换（见 vocab.txt 开头说明）
 VOCAB="${VOICE_VOCAB:-$HOME/.config/voice-input/vocab.txt}"
+# 同目录的 vocab.local.txt 也读，写法一样：放不想进 vocab.txt 的词（vocab.txt 常软链进
+# 共享的 dotfiles，而公司名、同事名这类词只该留在这台机器上）。面板只编辑 vocab.txt。
+VOCAB_LOCAL="${VOCAB%.txt}.local.txt"
+
+vocab_files() {  # 存在的词表文件，每行一个
+  local f
+  for f in "$VOCAB" "$VOCAB_LOCAL"; do [[ -f $f ]] && print -r -- "$f"; done
+}
 
 vocab_terms() {  # 逗号分隔的常用词
-  [[ -f $VOCAB ]] || return 0
-  grep -vE '^[[:space:]]*(#|$)' "$VOCAB" | grep -v '=>' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | paste -sd '、' - || true
+  local files; files=("${(@f)$(vocab_files)}")
+  [[ -n ${files[1]} ]] || return 0
+  cat "${files[@]}" | grep -vE '^[[:space:]]*(#|$)' | grep -v '=>' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | paste -sd '、' - || true
 }
 
 build_prompt() {
@@ -94,10 +103,12 @@ build_prompt() {
   fi
 }
 
-apply_rules() {  # stdin → stdout，按 vocab.txt 里的 "错误 => 正确" 替换
-  [[ -f $VOCAB ]] && grep -q '=>' "$VOCAB" || { cat; return 0 }
+apply_rules() {  # stdin → stdout，按词表里的 "错误 => 正确" 替换
+  local files; files=("${(@f)$(vocab_files)}")
+  [[ -n ${files[1]} ]] && grep -q '=>' "${files[@]}" || { cat; return 0 }
   perl -CSDA -Mutf8 -e '
-    my ($vocab) = @ARGV; my @rules;
+    my @rules;
+    for my $vocab (@ARGV) {
     open my $fh, "<:encoding(UTF-8)", $vocab or die;
     while (<$fh>) {
       next if /^\s*#/ or !/=>/;
@@ -108,10 +119,11 @@ apply_rules() {  # stdin → stdout，按 vocab.txt 里的 "错误 => 正确" �
       $pat = "(?i)(?<![A-Za-z0-9])$pat(?![A-Za-z0-9])" if $from =~ /^[\x00-\x7f]+$/;
       push @rules, [qr/$pat/, $to];
     }
+    }
     local $/; my $t = <STDIN>;
     $t =~ s/$_->[0]/$_->[1]/g for @rules;
     print $t;
-  ' "$VOCAB"
+  ' "${files[@]}"
 }
 
 die() { print -u2 -- "voice-input: $*"; return 1 }
