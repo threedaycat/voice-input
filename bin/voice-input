@@ -45,11 +45,16 @@ cfg() { [[ -f $CONFIG ]] && jq -r "$1 // empty" "$CONFIG" 2>/dev/null || true }
 # 按名字找麦克风，而不是按序号：插拔虚拟声卡（Steam、Teams）会让序号漂移。
 MIC_PATTERN="${VOICE_MIC:-$(cfg .mic)}"
 MIC_EXPLICIT=${MIC_PATTERN:+1}          # 用户明确选过麦克风，找不到就报错，不擅自换
-# 按顺序试：某个模型的免费额度用完（HTTP 429）就换下一个，每个模型的额度是分开算的。
-# qwen3-asr-flash（阿里云百炼，国内直连）最快最便宜，放第一；Gemini 作备用。
+# 按顺序试：某个模型的免费额度用完（HTTP 429/403）就换下一个，每个模型的额度是分开算的。
+# qwen3-asr-flash（阿里云百炼，国内直连）最快最便宜；它的两个日期快照是同一个模型、同样的调用方式，
+# 但各有一份新人免费额度（各 10 小时），所以先用快照，最后才用主模型（额度用完后按量付费）。
+# 2025-09-08 就是主模型现在指向的版本（同一段录音转出来一字不差），放第一。
+# 快照的 usage 不给 seconds 只给音频 token（实测 19.3 秒 = 483 token，约 25 token/秒），按这个折算。
+# 快照在百炼控制台「免费额度」里打开「用完即停」：额度用完直接返回 403，不扣钱，自动换下一个。
+# Gemini 作备用。
 _models="${VOICE_MODEL:-}"
 [[ -n $_models ]] || _models="$(cfg '.models | join(" ")')"
-[[ -n $_models ]] || _models="qwen3-asr-flash gemini-3-flash-preview gemini-2.5-flash local-qwen3-asr-1.7b"
+[[ -n $_models ]] || _models="qwen3-asr-flash-2025-09-08 qwen3-asr-flash-2026-02-10 qwen3-asr-flash gemini-3-flash-preview gemini-2.5-flash local-qwen3-asr-1.7b"
 MODELS=(${=_models})
 KEEP="${VOICE_KEEP:-}"
 [[ -n $KEEP ]] || KEEP="$(cfg .keep)"
@@ -306,9 +311,9 @@ call_qwen() {
   local p raw="" req=$job/qwen.json attempt
   for p in $parts; do
     base64 -i "$p" -o "$job/part.b64"
-    jq -n --arg ctx "$ctx" --arg mime "$mime" --rawfile data "$job/part.b64" '{
-      model: "qwen3-asr-flash", stream: false,
-      messages: [{role: "system", content: [{text: $ctx}]},
+    jq -n --arg m "$model" --arg ctx "$ctx" --arg mime "$mime" --rawfile data "$job/part.b64" '{
+      model: $m, stream: false,
+      messages: [{role: "system", content: [{type: "text", text: $ctx}]},
                  {role: "user", content: [{type: "input_audio",
                    input_audio: {data: ("data:" + $mime + ";base64," + ($data | gsub("\\s"; "")))}}]}],
       asr_options: {enable_itn: true}
@@ -318,7 +323,7 @@ call_qwen() {
         "$DASHSCOPE" -H "Authorization: Bearer $key" -H 'Content-Type: application/json' -d @"$req" 2>/dev/null) || code=000
       local x='{}'
       [[ $code == 200 ]] && x=$(jq -c --argjson p $PRICE_ASR_PER_SEC \
-        '(.usage.seconds // 0) as $s | {secs: $s, cost: ($s * $p)}' "$resp" 2>/dev/null || print '{}')
+        '(.usage.seconds // ((.usage.prompt_tokens_details.audio_tokens // 0) / 25 | ceil)) as $s | {secs: $s, cost: ($s * $p)}' "$resp" 2>/dev/null || print '{}')
       log_call "$model" "$code" "$x"
       [[ $code == 000 ]] || break
       last_err="连不上阿里云（网络？）"
@@ -449,6 +454,11 @@ transcribe() {  # transcribe <音频文件> [指定模型]
       nokey) print -u2 -- "voice-input: $last_err，换下一个模型" ;;
       429|503) last_err="$model 额度用完/繁忙"; print -u2 -- "voice-input: $last_err，换下一个模型"
                print -- $now >"$cool/$model"; [[ $code == 429 && $model != qwen* ]] && save_quota "$model" ;;
+      403) last_err="$model 返回 403：$(jq -r '.error.code // .code // empty' "$resp" 2>/dev/null)"
+           print -u2 -- "voice-input: $last_err，换下一个模型"
+           # 百炼开了「用完即停」、免费额度用完：AllocationQuota.FreeTierOnly。额度不会自己回来，
+           # 冷却记成一天后才到期（冷却判断是「距记录时间 < 600 秒」，所以记一个未来的时间）。
+           grep -q FreeTierOnly "$resp" 2>/dev/null && print -- $(( now + 86400 )) >"$cool/$model" ;;
       000) print -u2 -- "voice-input: $model 连不上，换下一个模型" ;;
       local) print -u2 -- "voice-input: $last_err" ;;
       *) last_err="$model 返回 HTTP $code：$(jq -r '.error.message // .message // empty' "$resp" 2>/dev/null || head -c 200 "$resp")"

@@ -18,9 +18,11 @@ local CALLS = HOME .. "/.local/state/voice-input/calls.jsonl"
 local QUOTA = HOME .. "/.local/state/voice-input/quota.json"
 local COOLDOWN = (os.getenv("TMPDIR") or "/tmp") .. "/voice-input/cooldown"
 local VOCAB = os.getenv("VOICE_VOCAB") or (CONFIG_DIR .. "/vocab.txt") -- 常用词表（可以软链到自己的 dotfiles）
-local DEFAULT_MODELS = { "qwen3-asr-flash", "gemini-3-flash-preview", "gemini-2.5-flash", "local-qwen3-asr-1.7b" }
+local DEFAULT_MODELS = { "qwen3-asr-flash-2025-09-08", "qwen3-asr-flash-2026-02-10", "qwen3-asr-flash", "gemini-3-flash-preview", "gemini-2.5-flash", "local-qwen3-asr-1.7b" }
 -- 设置页"可选模型"：没启用的也列出来，勾一下就能用。note 显示在模型名旁边
 local KNOWN_MODELS = {
+  { name = "qwen3-asr-flash-2025-09-08", provider = "阿里云百炼", note = "qwen3-asr-flash 现在指向的版本，单独 10 小时免费额度" },
+  { name = "qwen3-asr-flash-2026-02-10", provider = "阿里云百炼", note = "qwen3-asr-flash 的新快照，单独 10 小时免费额度" },
   { name = "qwen3-asr-flash", provider = "阿里云百炼", note = "¥0.79/小时录音，国内直连，最快" },
   { name = "gemini-3-flash-preview", provider = "Gemini", note = "免费额度，要走代理" },
   { name = "gemini-2.5-flash", provider = "Gemini", note = "免费额度，要走代理" },
@@ -125,7 +127,8 @@ local function buildStats(history, settingsModels)
   local byDay, estimated, seen = {}, false, {}
   local total = { count = 0, chars = 0, secs = 0 }
   for _, e in ipairs(history) do
-    local day, model = e.at:sub(1, 10), e.model or UNKNOWN
+    -- 日期快照（qwen3-asr-flash-2026-02-10）算进主模型：图上是同一个模型，只是额度分开
+    local day, model = e.at:sub(1, 10), e.model and e.model:gsub("%-%d%d%d%d%-%d%d%-%d%d$", "") or UNKNOWN
     seen[model] = true
     local d = byDay[day] or { count = 0, chars = 0, secs = 0, byModel = {} }
     local c, s = chars(e.text), durOf(e)
