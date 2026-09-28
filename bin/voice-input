@@ -151,17 +151,29 @@ cmd_start() {
   if [[ -f $PIDFILE ]]; then
     stop_recording 2>/dev/null || true
   fi
-  local idx dev
+  local idx dev want="$MIC_PATTERN"
   idx=$(find_mic)
-  # 没专门设置过麦克风：用本机第一个真实麦克风（跳过 Steam/Teams 这类虚拟声卡）。
-  # 明确设置过的找不到就报错，不换，免得悄悄录错设备。
-  if [[ -z $idx && -z ${MIC_EXPLICIT:-} ]]; then
+  # 找不到就退回本机第一个**真实**麦克风（cmd_devices 已经筛掉虚拟声卡）。
+  #
+  # 这里原本是「明确设置过的找不到就报错，不换」，理由是怕悄悄录到 Steam/Teams 那种
+  # 虚拟声卡、录出一段静音。但代价是：配置里写着 DJI、人不在工位没插接收器，语音输入
+  # 就整个不能用 —— 而这台机器几乎全靠语音输入。
+  # 2026-09-28 改成退回，安全性靠两件事保住：
+  #   ① 退回的候选来自 cmd_devices，虚拟声卡（含向日葵 OrayVirtualAudioDevice，
+  #      它在这台机器上正好排第一个）已经被筛掉；
+  #   ② 换了设备一定出声说，不闷着 —— 下面那条 stderr 会一路传到浮窗上。
+  # 真录到静音还有最后一道闸：transcribe() 的峰值检查会拦下来。
+  if [[ -z $idx ]]; then
     local first; first=$(cmd_devices | head -1)
-    [[ -n $first ]] && { MIC_PATTERN=$first; idx=$(find_mic); }
+    if [[ -n $first ]]; then
+      [[ -n $want ]] && print -u2 -- "voice-input: 没找到麦克风「$want」，这次用「$first」"
+      MIC_PATTERN=$first
+      idx=$(find_mic)
+    fi
   fi
   # 找不到就直接说清楚，不退回"系统默认输入"：默认输入常常是 Steam/Teams
   # 这类虚拟声卡，录下来全是静音，比报错更让人困惑。
-  [[ -n $idx ]] || die "没找到麦克风「${MIC_PATTERN:-任何麦克风}」：无线麦克风的接收器插好了吗？发射器开机了吗？"
+  [[ -n $idx ]] || die "一个可用的麦克风都没有（${want:+指定的是「$want」；}系统里只剩虚拟声卡或没有输入设备）"
   dev=":$idx"
   archive   # 上一段要是没来得及存（崩溃/被杀），先存起来，别覆盖掉
   # 16kHz 单声道足够语音识别，文件小，上传快。
@@ -255,7 +267,8 @@ save_quota() {  # 从 429 报错的 QuotaFailure 里取出上限值，按模型�
 
 cmd_devices() {  # 每行一个麦克风名字（去掉 Steam/Teams 这类虚拟声卡）
   ffmpeg -hide_banner -f avfoundation -list_devices true -i "" 2>&1 | sed -n '/audio devices/,$p' \
-    | sed -nE 's/.*\] \[[0-9]+\] (.*)/\1/p' | grep -viE "steam|teams|zoom|blackhole" || true
+    | sed -nE 's/.*\] \[[0-9]+\] (.*)/\1/p' \
+    | grep -viE "steam|teams|zoom|blackhole|oray|virtual|loopback|soundflower|voicemeeter|krisp|aggregate|多输出|集合设备" || true
 }
 
 cmd_test() {  # test [gemini|qwen]：测 Key 能不能用（列模型，不花钱）
