@@ -85,6 +85,12 @@ VOCAB_LOCAL="${VOCAB%.txt}.local.txt"
 vocab_files() {  # 存在的词表文件，每行一个
   local f
   for f in "$VOCAB" "$VOCAB_LOCAL"; do [[ -f $f ]] && print -r -- "$f"; done
+  # ⚠️ 必须显式 return 0：本机词表是**可选**的，它不存在时循环里最后一条
+  # `[[ -f ]]` 为假，整个函数就以非零结束。脚本开的是 err_return，于是
+  # `terms=$(vocab_terms)` 跟着失败、polish 当场返回 —— 连它自己"校对失败就退回
+  # 原始识别结果"的兜底都跳过，ASR 明明成功了，最后吐出空串、退出码 1、一句话也不说。
+  # 2026-09-28 在一台没有 vocab.local.txt 的新机器上就是这么"一直转写失败"的。
+  return 0
 }
 
 vocab_terms() {  # 逗号分隔的常用词
