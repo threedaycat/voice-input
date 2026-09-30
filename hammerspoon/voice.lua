@@ -605,7 +605,15 @@ local tap = hs.eventtap.new(
       -- 按住触发键后 0.8 秒内按了别的键，才算组合键（⌘C 这种都是一按下就按）。
       -- 说了一会儿之后再有按键事件（鼠标驱动、误碰），不能把整段录音丢掉。
       -- 鼠标侧键触发时不算组合键：它不会和 ⌘C 这类混在一起
-      if pressAt and pressSource == "key" and hs.timer.secondsSinceEpoch() - pressAt < 0.8 then
+      -- 自己发出去的按键不算：paste() 贴上一段用的 ⌘V（keycode 9）和鼠标前键的回车也是 keyDown 事件。
+      -- 连着说两段时，上一段的转写常常正好在下一段刚开始录的 0.8 秒里落地，那一下 ⌘V 会被当成
+      -- 用户按的组合键，松手就"已取消"，只能去面板重新转写。2026-09-29 复现两次，
+      -- hammerspoon.log 里 "combo key 9 -> will cancel" 都和上一条 "job N file exit=0" 同一秒。
+      -- 判据是事件源进程号：我们 post 的事件带 Hammerspoon 自己的 pid，真手按的键不会。
+      local selfSent = e:getProperty(hs.eventtap.event.properties.eventSourceUnixProcessID)
+                         == hs.processInfo.processID
+      if pressAt and pressSource == "key" and not selfSent
+         and hs.timer.secondsSinceEpoch() - pressAt < 0.8 then
         comboUsed = true
         log.i("combo key " .. e:getKeyCode() .. " -> will cancel")
       end
